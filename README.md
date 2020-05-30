@@ -1,3 +1,12 @@
+# About this Repo
+
+This is a fork of the Machina library to run on Linux under .NET Core 3.1. Not all features work properly (Neither of the original socket types work, needed to create a third one, firewall control does not work). This likely does not work on Windows, but there are plans to make sure it will work on both.
+
+Additional Dependencies from upstream:
+
+- `lsof` is required to get connections for a process, vs the win32 API used upstream
+- The NuGet packages SnmpShartNet and PacketDotNet have been added to make the packet capture easier (and ideally cross platform)
+
 # Machina
 
 Machina is a library that allows developers to read network data from the windows networking subsystem and reassemble it into usable information.

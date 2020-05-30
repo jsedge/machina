@@ -6,6 +6,7 @@ using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using PacketDotNet;
 
 namespace Machina
 {
@@ -53,13 +54,13 @@ namespace Machina
         /// </summary>
         public string LocalIP
         { get; set; } = "";
-        
+
         /// <summary>
         /// Specifies the Window Name of the application that is generating or receiving the traffic.  Either ProcessID, WindowName or WindowClass must be specified.
         /// </summary>
         public string WindowName
         { get; set; } = "";
-        
+
         /// <summary>
         /// Specifies the Window Class of the application that is generating or receiving the traffic.  Either ProcessID, WindowName or WindowClass must be specified.
         /// </summary>
@@ -81,7 +82,7 @@ namespace Machina
         {
             DataReceived?.Invoke(connection, data);
         }
-        
+
         public delegate void DataSentDelegate(string connection, byte[] data);
 
         public DataSentDelegate DataSent = null;
@@ -90,7 +91,7 @@ namespace Machina
         {
             DataSent?.Invoke(connection, data);
         }
-        
+
         #endregion
 
         private List<IRawSocket> _sockets = new List<IRawSocket>();
@@ -121,19 +122,21 @@ namespace Machina
         /// </summary>
         public void Start()
         {
+            UseSocketFilter = true;
             if (ProcessID == 0 && string.IsNullOrWhiteSpace(WindowName) && string.IsNullOrWhiteSpace(WindowClass))
                 throw new ArgumentException("Either Process ID, Window Name or Window Class must be specified");
             if (DataReceived == null)
                 throw new ArgumentException("DataReceived delegate must be specified.");
 
-            _processTCPInfo.ProcessID = ProcessID;
             _processTCPInfo.ProcessWindowName = WindowName;
+            _processTCPInfo.ProcessWindowName = "ffxiv_dx11.exe";
             _processTCPInfo.ProcessWindowClass = WindowClass;
 
             _monitorThread = new Thread(new ParameterizedThreadStart(Run));
             _monitorThread.Name = "Machina.TCPNetworkMonitor.Start";
             _monitorThread.IsBackground = true;
             _monitorThread.Start(this);
+            Console.WriteLine("TCPNetworkMonitor has started");
         }
 
         /// <summary>
@@ -210,7 +213,7 @@ namespace Machina
                 }
                 catch (Exception ex)
                 {
-                    Trace.WriteLine("TCPNetworkMonitor Error: " + ex.ToString(), "DEBUG-MACHINA");
+                    Console.WriteLine("TCPNetworkMonitor Error: " + ex.ToString(), "DEBUG-MACHINA");
                     return;
                 }
             }
@@ -247,10 +250,10 @@ namespace Machina
                 }
             }
         }
-        
+
         private void UpdateSockets()
         {
-            for (int i=0;i<_connections.Count;i++)
+            for (int i = 0; i < _connections.Count; i++)
             {
                 bool found = false;
                 for (int j = 0; j < _sockets.Count; j++)
@@ -264,31 +267,34 @@ namespace Machina
                         new IPAddress(_connections[i].LocalIP).ToString() + "]" +
                         (UseSocketFilter ? "=> [" + new IPAddress(_connections[i].RemoteIP).ToString() + "]." : ""), "DEBUG-MACHINA");
 
-                    if (MonitorType == NetworkMonitorType.WinPCap)
-                        _sockets.Add(new RawPCap());
-                    else
-                        _sockets.Add(new RawSocket());
+                    // if (MonitorType == NetworkMonitorType.WinPCap)
+                    //     _sockets.Add(new RawPCap());
+                    // else if (MonitorType == NetworkMonitorType.RawSocket)
+                    //     _sockets.Add(new RawSocket());
+                    // else
+                    _sockets.Add(new RawSharpPcap());
                     _sockets.Last().Create(_connections[i].LocalIP, UseSocketFilter ? _connections[i].RemoteIP : 0);
                 }
             }
 
-            for (int i=_sockets.Count-1;i>=0;i--)
+            for (int i = _sockets.Count - 1; i >= 0; i--)
             {
                 bool found = false;
-                for (int j=0;j<_connections.Count;j++)
+                for (int j = 0; j < _connections.Count; j++)
                     if (_connections[j].LocalIP == _sockets[i].LocalIP &&
                         (!UseSocketFilter || (_connections[j].RemoteIP == _sockets[i].RemoteIP)))
                         found = true;
 
                 if (!found)
                 {
-                    Trace.WriteLine("TCPNetworkMonitor: Stopping " + MonitorType.ToString() + " listener on [" +
+                    Console.WriteLine("TCPNetworkMonitor: Stopping " + MonitorType.ToString() + " listener on [" +
                         new IPAddress(_sockets[i].LocalIP).ToString() + "]" +
                         (UseSocketFilter ? "=> [" + new IPAddress(_sockets[i].RemoteIP).ToString() + "]." : ""), "DEBUG-MACHINA");
                     _sockets[i].Destroy();
                     _sockets.RemoveAt(i);
                 }
             }
+
         }
 
         private void ProcessNetworkData()
@@ -297,11 +303,13 @@ namespace Machina
             byte[] buffer;
 
             for (int i = 0; i < _sockets.Count; i++)
+            {
                 while ((size = _sockets[i].Receive(out buffer)) > 0)
                 {
                     ProcessData(buffer, size);
                     _sockets[i].FreeBuffer(ref buffer);
                 }
+            }
         }
 
 
@@ -309,16 +317,35 @@ namespace Machina
         {
             byte[] tcpbuffer;
             byte[] payloadBuffer;
-            for (int i = 0; i < _connections.Count; i++)
+            foreach (var connection in _connections)
             {
-                TCPConnection connection = _connections[i];
+                var packet = PacketDotNet.Packet.ParsePacket(LinkLayers.Ethernet, buffer);
+
+                var tcpPacket = packet.Extract<PacketDotNet.TcpPacket>();
+                var ipPacket = (PacketDotNet.IPPacket)tcpPacket.ParentPacket;
+                
+                if (new IPAddress(connection.RemoteIP).Equals(ipPacket.SourceAddress) &&
+                    connection.RemotePort == tcpPacket.SourcePort)
+                {
+                    OnDataReceived(connection.ID, tcpPacket.PayloadData);
+                }
+                else if (new IPAddress(connection.RemoteIP).Equals(ipPacket.DestinationAddress) &&
+                    connection.RemotePort == tcpPacket.DestinationPort)
+                {
+                    OnDataSent(connection.ID, tcpPacket.PayloadData);
+                }
+
+                continue; // Original Windows code below here
                 connection.IPDecoder_Send.FilterAndStoreData(buffer, size);
 
                 while ((tcpbuffer = connection.IPDecoder_Send.GetNextIPPayload()) != null)
-                { 
+                {
+                    Console.WriteLine("In outer send loop");
                     connection.TCPDecoder_Send.FilterAndStoreData(tcpbuffer);
                     while ((payloadBuffer = connection.TCPDecoder_Send.GetNextTCPDatagram()) != null)
                     {
+                        Console.WriteLine("In inner send loop");
+                        Console.WriteLine(payloadBuffer);
                         OnDataSent(connection.ID, payloadBuffer);
                     }
                 }
@@ -326,9 +353,11 @@ namespace Machina
                 connection.IPDecoder_Receive.FilterAndStoreData(buffer, size);
                 while ((tcpbuffer = connection.IPDecoder_Receive.GetNextIPPayload()) != null)
                 {
+                    Console.WriteLine("In outer recieve loop");
                     connection.TCPDecoder_Receive.FilterAndStoreData(tcpbuffer);
                     while ((payloadBuffer = connection.TCPDecoder_Receive.GetNextTCPDatagram()) != null)
                     {
+                        Console.WriteLine("In inner recieve loop");
                         OnDataReceived(connection.ID, payloadBuffer);
                     }
                 }

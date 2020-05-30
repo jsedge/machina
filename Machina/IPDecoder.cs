@@ -20,6 +20,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Diagnostics;
+using SharpPcap;
+using PacketDotNet;
 
 namespace Machina
 {
@@ -79,6 +81,7 @@ namespace Machina
         /// <param name="size">usable length of byte array - must be less than its allocated length.</param>
         public unsafe void FilterAndStoreData(byte[] buffer, int size)
         {
+            
             int offset = 0;
 
             if (buffer == null || buffer.Length == 0)
@@ -86,7 +89,7 @@ namespace Machina
 
             if (buffer.Length < size)
             {
-                Trace.WriteLine("IPDecoder: Buffer length is less than specified size.  Size=[" + size.ToString() + "], Length=[" + buffer.Length + "]", "DEBUG-MACHINA");
+                Console.WriteLine("IPDecoder: Buffer length is less than specified size.  Size=[" + size.ToString() + "], Length=[" + buffer.Length + "]", "DEBUG-MACHINA");
                 return;
             }
 
@@ -101,7 +104,7 @@ namespace Machina
                         // TODO: IP6 packets, and mixed IP4/IP6, need to be tested with real-world data.
                         if (offset + sizeof(IPv6Header) > size)
                         {
-                            Trace.WriteLine("IPDecoder: IP6 Packet too small for header. offset: " + offset.ToString() + ", size: " + size.ToString(), "DEBUG-MACHINA");
+                            Console.WriteLine("IPDecoder: IP6 Packet too small for header. offset: " + offset.ToString() + ", size: " + size.ToString(), "DEBUG-MACHINA");
                             return;
                         }
 
@@ -110,7 +113,7 @@ namespace Machina
                         // make sure we have a valid exit condition
                         if (header6.PayloadLength * 8 > buffer.Length - offset - sizeof(IPv6Header))
                         {
-                            Trace.WriteLine("IPDecoder: IP6 Packet too small for payload. payload length: " +
+                            Console.WriteLine("IPDecoder: IP6 Packet too small for payload. payload length: " +
                                 (header6.payload_length * 8).ToString() + ", Buffer: " + buffer.Length.ToString() + ", offset: " + offset.ToString(), "DEBUG-MACHINA");
                             return;
                         }
@@ -121,10 +124,10 @@ namespace Machina
                     }
                     else if (version != 4)
                     {
-                        Trace.WriteLine("IPDecoder: IP protocol version is neither 4 nor 6. Version is " + version.ToString(), "DEBUG-MACHINA");
+                        Console.WriteLine("IPDecoder: IP protocol version is neither 4 nor 6. Version is " + version.ToString(), "DEBUG-MACHINA");
                         return;
                     }
-
+                    Console.WriteLine($"IPv{version}");
                     IPv4Header ip4Header = *(IPv4Header*)(ptr + offset);
 
                     int packetLength = ip4Header.Length;
@@ -136,12 +139,12 @@ namespace Machina
                     // make sure we have a valid exit condition
                     if (packetLength <= 0 & packetLength > 65535)
                     {
-                        Trace.WriteLine("IPDecoder: Invalid packet length [" + packetLength.ToString() + "].", "DEBUG-MACHINA");
+                        Console.WriteLine("IPDecoder: Invalid packet length [" + packetLength.ToString() + "].", "DEBUG-MACHINA");
                         return;
                     }
                     if (packetLength > buffer.Length - offset)
                     {
-                        Trace.WriteLine("IPDecoder: buffer too small to hold complete packet.  Packet length is [" + packetLength.ToString() + "], remaining buffer is [" + (buffer.Length - offset).ToString() + "].", "DEBUG-MACHINA");
+                        Console.WriteLine("IPDecoder: buffer too small to hold complete packet.  Packet length is [" + packetLength.ToString() + "], remaining buffer is [" + (buffer.Length - offset).ToString() + "].", "DEBUG-MACHINA");
                         return;
                     }
 
@@ -152,9 +155,13 @@ namespace Machina
                     {
 
                         // store payload
+                        Console.WriteLine("Storing payload");
                         byte[] ret = new byte[packetLength];
                         Array.Copy(buffer, offset, ret, 0, ret.Length);
                         Fragments.Add(ret);
+                    }else{
+                        Console.WriteLine($":<. Src: {ip4Header.ip_srcaddr}, Dst: {ip4Header.ip_destaddr}, Prot: {ip4Header.protocol}");
+                        Console.WriteLine($"Should be Src: {_sourceIP}, Dst: {_destinationIP}, Prot: {_protocol}");
                     }
 
                     offset += packetLength;
