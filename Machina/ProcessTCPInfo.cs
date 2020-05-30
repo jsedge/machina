@@ -140,7 +140,7 @@ namespace Machina
             else
                 ProcessID = (uint)Process.GetProcessesByName(ProcessWindowName).First().Id;         
 
-            if (_currentProcessID == 0)
+            if (ProcessID == 0)
             {
                 if (connections.Count > 0)
                 {
