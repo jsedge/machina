@@ -138,7 +138,7 @@ namespace Machina
             if (ProcessID > 0)
                 ProcessID = ProcessID;
             else
-                ProcessID = (uint)Process.GetProcessesByName(ProcessWindowName).First().Id;         
+                ProcessID = (uint)Process.GetProcessesByName(ProcessWindowName).FirstOrDefault()?.Id;         
 
             if (ProcessID == 0)
             {

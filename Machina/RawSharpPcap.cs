@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Net;
 using System.Threading;
@@ -14,7 +15,7 @@ namespace Machina {
 
         private ICaptureDevice CaptureDevice;
 
-        private NetworkBufferFactory _bufferFactory = new NetworkBufferFactory(20, 0);
+        private ConcurrentQueue<byte[]> backlog = new ConcurrentQueue<byte[]>();
 
         public void Create(uint localAddress, uint remoteAddress = 0){
             LocalIP = localAddress;
@@ -37,16 +38,15 @@ namespace Machina {
         public int Receive(out byte[] buffer)
         {
             // retrieve data from allocated buffer.
-            NetworkBufferFactory.Buffer data = _bufferFactory.GetNextAllocatedBuffer();
-            buffer = data?.Data;
-            // Console.WriteLine($"Returning {data?.AllocatedSize} bytes");
-            return data?.AllocatedSize ?? 0;
+            if(backlog.TryDequeue(out buffer)){
+                return buffer.Count();
+            }
+            return 0;
         }
 
         public void FreeBuffer(ref byte[] buffer)
         {
-            NetworkBufferFactory.Buffer data = new NetworkBufferFactory.Buffer() { Data = buffer, AllocatedSize = 0 };
-            _bufferFactory.AddFreeBuffer(data);
+            return;
         }
 
         public void Destroy(){
@@ -55,20 +55,20 @@ namespace Machina {
         }
 
         private void ProcessPcapData(object sender, CaptureEventArgs e){
-            NetworkBufferFactory.Buffer buffer = _bufferFactory.GetNextFreeBuffer();
-
-            // prepare data - skip the 14-byte ethernet header
-            buffer.AllocatedSize = (int)e.Packet.Data.Length;
-            if (buffer.AllocatedSize > buffer.Data.Length)
-                Console.WriteLine("RawPCap: packet length too large: " + buffer.AllocatedSize.ToString(), "DEBUG-MACHINA");
-            else
-            {
-                for(int i = 0; i < buffer.AllocatedSize; i++){
-                    buffer.Data[i] = e.Packet.Data[i];
-                }
+            backlog.Enqueue(e.Packet.Data);
+            return;
+            // // prepare data - skip the 14-byte ethernet header
+            // buffer.AllocatedSize = (int)e.Packet.Data.Length;
+            // if (buffer.AllocatedSize > buffer.Data.Length)
+            //     Console.WriteLine("RawPCap: packet length too large: " + buffer.AllocatedSize.ToString(), "DEBUG-MACHINA");
+            // else
+            // {
+            //     for(int i = 0; i < buffer.AllocatedSize; i++){
+            //         buffer.Data[i] = e.Packet.Data[i];
+            //     }
                 
-                _bufferFactory.AddAllocatedBuffer(buffer);
-            }
+            //     _bufferFactory.AddAllocatedBuffer(buffer);
+            // }
         }
     }
 }
